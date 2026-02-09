@@ -1,0 +1,249 @@
+services:
+  # Fix RustFS volume permissions
+  rustfs-permissions:
+    image: alpine:latest
+    command: sh -c "chown -R 10001:10001 /data/rustfs0 /data/rustfs1"
+    volumes:
+      - rustfs-data-0:/data/rustfs0
+      - rustfs-data-1:/data/rustfs1
+    restart: "no"
+    networks:
+      - datalake-network
+
+  # RustFS - S3-compatible object storage
+  rustfs:
+    image: rustfs/rustfs:latest
+    depends_on:
+      rustfs-permissions:
+        condition: service_completed_successfully
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Console/web interface
+    environment:
+      RUSTFS_VOLUMES: /data/rustfs{0...1}
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: true
+      RUSTFS_ACCESS_KEY: admin
+      RUSTFS_SECRET_KEY: admin123
+      RUSTFS_CORS_ALLOWED_ORIGINS: "*"
+      RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS: "*"
+      RUSTFS_OBJECT_CACHE_ENABLE: "false"
+    volumes:
+      - rustfs-data-0:/data/rustfs0
+      - rustfs-data-1:/data/rustfs1
+    networks:
+      - datalake-network
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh", "-c",
+          "curl -f http://127.0.0.1:9000/health && curl -f http://127.0.0.1:9001/rustfs/console/health"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+
+  # Create S3 bucket - Initializes the datalake bucket
+  create-s3-bucket:
+    image: amazon/aws-cli:latest
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: admin123
+      AWS_DEFAULT_REGION: us-east-1
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        echo "Waiting for S3 service to be ready..."
+        sleep 5
+        echo "Creating datalake bucket..."
+        aws --endpoint-url=http://rustfs:9000 s3 mb s3://datalake || echo "Bucket might already exist"
+        echo "Bucket creation complete!"
+        aws --endpoint-url=http://rustfs:9000 s3 ls
+    networks:
+      - datalake-network
+
+  # PostgreSQL - LakeKeeper metadata storage
+  postgres-catalog:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: lakekeeper
+      POSTGRES_PASSWORD: lakekeeper123
+      POSTGRES_DB: lakekeeper
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-catalog-data:/var/lib/postgresql/data
+    networks:
+      - datalake-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lakekeeper -d lakekeeper"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # LakeKeeper Migration - Run database migrations
+  lakekeeper-migrate:
+    image: quay.io/lakekeeper/catalog:latest
+    environment:
+      LAKEKEEPER__PG_ENCRYPTION_KEY: "This-is-NOT-Secure-Change-Me!"
+      LAKEKEEPER__PG_DATABASE_URL_READ: "postgresql://lakekeeper:lakekeeper123@postgres-catalog:5432/lakekeeper"
+      LAKEKEEPER__PG_DATABASE_URL_WRITE: "postgresql://lakekeeper:lakekeeper123@postgres-catalog:5432/lakekeeper"
+      RUST_LOG: "info"
+    command: ["migrate"]
+    depends_on:
+      postgres-catalog:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - datalake-network
+
+  # LakeKeeper - Iceberg REST Catalog
+  # UI available at: http://localhost:8181/ui/
+  lakekeeper:
+    image: quay.io/lakekeeper/catalog:latest
+    environment:
+      LAKEKEEPER__PG_ENCRYPTION_KEY: "This-is-NOT-Secure-Change-Me!"
+      LAKEKEEPER__PG_DATABASE_URL_READ: "postgresql://lakekeeper:lakekeeper123@postgres-catalog:5432/lakekeeper"
+      LAKEKEEPER__PG_DATABASE_URL_WRITE: "postgresql://lakekeeper:lakekeeper123@postgres-catalog:5432/lakekeeper"
+      RUST_LOG: "info"
+    command: ["serve"]
+    ports:
+      - "8181:8181"  # REST API + UI
+    depends_on:
+      lakekeeper-migrate:
+        condition: service_completed_successfully
+      postgres-catalog:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+    networks:
+      - datalake-network
+    healthcheck:
+      test: ["CMD", "/home/nonroot/lakekeeper", "healthcheck"]
+      interval: 5s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # Bootstrap LakeKeeper - Initialize the catalog
+  lakekeeper-bootstrap:
+    image: curlimages/curl
+    depends_on:
+      lakekeeper:
+        condition: service_healthy
+    restart: "no"
+    command:
+      - -w
+      - "%{http_code}"
+      - "-v"
+      - "http://lakekeeper:8181/management/v1/bootstrap"
+      - "-H"
+      - "Content-Type: application/json"
+      - "--data"
+      - '{"accept-terms-of-use": true}'
+      - "-o"
+      - "/dev/null"
+    networks:
+      - datalake-network
+
+  # pg_duckdb - Query engine with DuckDB analytics
+#  pg-duckdb:
+#    image: pgduckdb/pgduckdb:18-v1.1.1
+#    environment:
+#      POSTGRES_USER: duckdb
+#      POSTGRES_PASSWORD: duckdb123
+#    ports:
+#      - "5434:5432"
+#    depends_on:
+#      lakekeeper-bootstrap:
+#        condition: service_completed_successfully
+#      rustfs:
+#        condition: service_healthy
+#    networks:
+#      - datalake-network
+#    healthcheck:
+#      test: ["CMD-SHELL", "pg_isready -U duckdb -d postgres"]
+#      interval: 5s
+#      timeout: 5s
+#      retries: 5
+
+  # pg_duckdb Iceberg Initialization
+#  pg-duckdb-init-iceberg:
+#    image: pgduckdb/pgduckdb:18-v1.1.1
+#    environment:
+#      PGHOST: pg-duckdb
+#      PGPORT: 5432
+#      PGUSER: duckdb
+#      PGPASSWORD: duckdb123
+#      PGDATABASE: duckdb
+#    depends_on:
+#      pg-duckdb:
+#        condition: service_healthy
+#    restart: "no"
+#    entrypoint: /bin/sh
+#    command:
+#      - -c
+#      - |
+#        echo "Waiting for pg_duckdb to be ready..."
+#        sleep 5
+#        echo "Initializing Iceberg catalog in pg_duckdb..."
+#        psql -v ON_ERROR_STOP=1 <<-EOSQL
+#          -- Install and load Iceberg extension
+#          SELECT duckdb.install_extension('iceberg');
+#          SELECT duckdb.load_extension('iceberg');
+#
+#          -- Attach the Iceberg REST catalog
+#          ATTACH 'datalake-warehouse' AS 'datalake' (
+#              TYPE ICEBERG,
+#              ENDPOINT 'http://lakekeeper:8181/catalog',
+#              AUTHORIZATION_TYPE 'none'
+#          );
+#
+#          -- Confirm setup
+#          SELECT 'pg_duckdb Iceberg catalog initialized successfully' AS status;
+#        EOSQL
+#        echo "✓ Iceberg catalog initialization complete!"
+#    networks:
+#      - datalake-network
+
+  # Data Initialization - Populate sample Iceberg tables
+  data-init:
+    build:
+      context: ./init-data
+      dockerfile: Dockerfile
+    environment:
+      LAKEKEEPER_URI: http://lakekeeper:8181
+      LAKEKEEPER_WAREHOUSE: datalake-warehouse
+      S3_ENDPOINT: http://rustfs:9000
+      S3_BUCKET: datalake
+      S3_ACCESS_KEY_ID: admin
+      S3_SECRET_ACCESS_KEY: admin123
+      S3_REGION: us-east-1
+    depends_on:
+      lakekeeper:
+        condition: service_healthy
+      create-s3-bucket:
+        condition: service_completed_successfully
+    restart: "no"
+    networks:
+      - datalake-network
+    profiles:
+      - init
+
+networks:
+  datalake-network:
+    driver: bridge
+
+volumes:
+  rustfs-data-0:
+  rustfs-data-1:
+  postgres-catalog-data:
