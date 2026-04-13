@@ -155,65 +155,52 @@ services:
     networks:
       - datalake-network
 
-  # pg_duckdb - Query engine with DuckDB analytics
-#  pg-duckdb:
-#    image: pgduckdb/pgduckdb:18-v1.1.1
-#    environment:
-#      POSTGRES_USER: duckdb
-#      POSTGRES_PASSWORD: duckdb123
-#    ports:
-#      - "5434:5432"
-#    depends_on:
-#      lakekeeper-bootstrap:
-#        condition: service_completed_successfully
-#      rustfs:
-#        condition: service_healthy
-#    networks:
-#      - datalake-network
-#    healthcheck:
-#      test: ["CMD-SHELL", "pg_isready -U duckdb -d postgres"]
-#      interval: 5s
-#      timeout: 5s
-#      retries: 5
+  # Trino - Lightweight query engine with native Iceberg support
+  trino:
+    build:
+      context: ./trino
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      lakekeeper-bootstrap:
+        condition: service_completed_successfully
+      rustfs:
+        condition: service_healthy
+    networks:
+      - datalake-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider --quiet http://localhost:8080/v1/info || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
-  # pg_duckdb Iceberg Initialization
-#  pg-duckdb-init-iceberg:
-#    image: pgduckdb/pgduckdb:18-v1.1.1
-#    environment:
-#      PGHOST: pg-duckdb
-#      PGPORT: 5432
-#      PGUSER: duckdb
-#      PGPASSWORD: duckdb123
-#      PGDATABASE: duckdb
-#    depends_on:
-#      pg-duckdb:
-#        condition: service_healthy
-#    restart: "no"
-#    entrypoint: /bin/sh
-#    command:
-#      - -c
-#      - |
-#        echo "Waiting for pg_duckdb to be ready..."
-#        sleep 5
-#        echo "Initializing Iceberg catalog in pg_duckdb..."
-#        psql -v ON_ERROR_STOP=1 <<-EOSQL
-#          -- Install and load Iceberg extension
-#          SELECT duckdb.install_extension('iceberg');
-#          SELECT duckdb.load_extension('iceberg');
-#
-#          -- Attach the Iceberg REST catalog
-#          ATTACH 'datalake-warehouse' AS 'datalake' (
-#              TYPE ICEBERG,
-#              ENDPOINT 'http://lakekeeper:8181/catalog',
-#              AUTHORIZATION_TYPE 'none'
-#          );
-#
-#          -- Confirm setup
-#          SELECT 'pg_duckdb Iceberg catalog initialized successfully' AS status;
-#        EOSQL
-#        echo "✓ Iceberg catalog initialization complete!"
-#    networks:
-#      - datalake-network
+  # Superset - Data visualization and exploration platform
+  superset:
+    build:
+      context: ./superset
+      dockerfile: Dockerfile
+    ports:
+      - "8088:8088"
+    environment:
+      SUPERSET_SECRET_KEY: "change-this-in-production"
+      SUPERSET_LOAD_EXAMPLES: "no"
+    volumes:
+      - superset-data:/app/superset_home
+      - ./superset/init-superset.sh:/app/docker-init.sh:ro
+    depends_on:
+      trino:
+        condition: service_healthy
+    networks:
+      - datalake-network
+    command: ["/bin/sh", "-c", "/app/docker-init.sh && /usr/bin/run-server.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8088/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
   # Data Initialization - Populate sample Iceberg tables
   data-init:
@@ -247,3 +234,4 @@ volumes:
   rustfs-data-0:
   rustfs-data-1:
   postgres-catalog-data:
+  superset-data:

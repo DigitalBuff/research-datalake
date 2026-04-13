@@ -5,13 +5,14 @@ This is the minimal foundational setup for the lightweight data lake PoC, consis
 - **LakeKeeper**: Iceberg REST catalog
 - **PostgreSQL**: Metadata storage for LakeKeeper
 - **Trino**: Lightweight query engine with native Iceberg support
+- **Superset**: Modern data visualization and exploration platform
 
 See [spec.md](./spec.md) for the complete architecture plan.
 
 ## Prerequisites
 
 - Docker and Docker Compose installed
-- Ports available: 5433, 8080, 8181, 9000, 9001
+- Ports available: 5433, 8080, 8088, 8181, 9000, 9001
 - AWS CLI (optional, for manual S3 operations)
 - Trino CLI (optional, for connecting to Trino)
 
@@ -21,12 +22,14 @@ See [spec.md](./spec.md) for the complete architecture plan.
   - PostgreSQL: Standard image (better stability for metadata storage)
   - RustFS: Rust-based S3-compatible object storage
   - LakeKeeper: Optimized Rust binary
+  - Superset: Modern data visualization platform
   - Bootstrap utilities: Minimal Alpine images
 
 - **Data Persistence**:
   - PostgreSQL: Fully persistent via Docker volume
   - LakeKeeper: Metadata persists in PostgreSQL
   - RustFS: Fully persistent via Docker volumes (2 data volumes)
+  - Superset: Persistent via Docker volume (dashboards and queries saved)
 
 ## Quick Start
 
@@ -39,6 +42,7 @@ See [spec.md](./spec.md) for the complete architecture plan.
 
 | Service | URL | Purpose |
 |---------|-----|---------|
+| **Superset** | http://localhost:8088 | Data visualization and exploration (login: admin/admin) |
 | **Trino** | http://localhost:8080 | Query engine endpoint |
 | **LakeKeeper UI** | http://localhost:8181/ui/ | Manage warehouses, namespaces, and tables |
 | **LakeKeeper API** | http://localhost:8181 | REST catalog API |
@@ -61,6 +65,13 @@ Region: us-east-1
 ## Service Architecture
 
 ```
+┌─────────────────────────────────────────────────┐
+│  Superset (port 8088)                          │
+│  • Data Visualization & Exploration            │
+│  • Interactive Dashboards                      │
+└────────┬───────────────────────────────────────┘
+         │
+         ▼
 ┌─────────────────────────────────────────────────┐
 │  Trino (port 8080)                             │
 │  • Query Engine                                │
@@ -109,6 +120,10 @@ digitalbuff_datalake_stack/
 ├── README.md                    # This file
 ├── spec.md                      # Architecture specification
 ├── .gitignore
+├── superset/
+│   ├── Dockerfile              # Superset with Trino support
+│   ├── README.md               # Superset documentation
+│   └── init-superset.sh        # Superset initialization script
 ├── init-data/
 │   ├── Dockerfile              # Data init container
 │   ├── requirements.txt        # Python dependencies
@@ -120,8 +135,16 @@ digitalbuff_datalake_stack/
             └── iceberg.properties  # Iceberg connector config
 ```
 
+## Memory usage
+- RustFS: 120-160MB
+- LakeKeeper: 30-50MB
+- Trino: 780MB
+- Superset: 210MB
+
 ## References
 
+- [Apache Superset Documentation](https://superset.apache.org/docs/intro)
+- [Superset Trino Connection](https://superset.apache.org/docs/databases/trino)
 - [Trino Documentation](https://trino.io/docs/current/)
 - [Trino Iceberg Connector](https://trino.io/docs/current/connector/iceberg.html)
 - [Lightweight Trino Distribution](https://dev.to/resurfacelabs/building-a-lightweight-trino-distribution-54h7)

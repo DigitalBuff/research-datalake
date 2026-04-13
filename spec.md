@@ -205,6 +205,10 @@ Warehouses are created programmatically via the management API (`POST /managemen
 - Web UI: `http://lakekeeper:8181/ui/`
 - Health: via built-in `lakekeeper healthcheck` command
 
+**Credential Vending**: LakeKeeper automatically vends S3 credentials to query engines via the Iceberg REST catalog protocol. When a warehouse is configured with S3 storage credentials, LakeKeeper includes these credentials in table metadata responses. This eliminates the need for static S3 configuration in query engines like Trino.
+
+For this PoC, LakeKeeper vends the static RustFS credentials configured during warehouse creation. In production environments with AWS S3, LakeKeeper can be configured to vend temporary credentials via AWS STS (Security Token Service), providing better security through credential rotation and time-limited access.
+
 ### 4.4 Trino (Query Engine)
 
 **Purpose**: Execute SQL queries against Iceberg tables via native Iceberg connector
@@ -221,6 +225,7 @@ Warehouses are created programmatically via the management API (`POST /managemen
 - `iceberg.catalog.type=rest`
 - `iceberg.rest-catalog.uri=http://lakekeeper:8181/catalog`
 - `iceberg.rest-catalog.warehouse=datalake-warehouse`
+- S3 credentials are obtained from LakeKeeper via credential vending (no static S3 configuration in Trino)
 
 **Connection Details** (for PowerBI and other clients):
 - Host: `localhost` (or server IP)
@@ -342,6 +347,30 @@ All services communicate on an internal Docker network (`datalake-network`, brid
 - Persistent volumes for RustFS and PostgreSQL
 - Ingress configuration for external access
 
+### Phase 4: Production Hardening (Future)
+
+**Scope**:
+- Security improvements for production deployment
+
+**Security Enhancements**:
+1. **Temporary Credential Vending**:
+   - Replace RustFS with AWS S3
+   - Configure LakeKeeper to vend temporary credentials via AWS STS
+   - Credentials rotate automatically and expire after configurable time window
+   - Requires: IAM role for LakeKeeper, STS API access
+2. **Authentication & Authorization**:
+   - Enable Trino authentication (LDAP, OAuth, or Kerberos)
+   - Configure LakeKeeper access control
+   - Implement role-based access to warehouses and namespaces
+3. **Encryption**:
+   - TLS for all service communication
+   - Encryption at rest for PostgreSQL and object storage
+   - Secure credential storage (Vault, AWS Secrets Manager)
+4. **Network Security**:
+   - Private networking (no public endpoints)
+   - Network policies to restrict service-to-service communication
+   - Firewall rules and security groups
+
 ---
 
 ## 8. File Structure
@@ -395,6 +424,7 @@ digitalbuff-datalake-stack/
 
 1. **Initialization** - Requires explicit bootstrap, migration, and warehouse creation via API
 2. **Configuration** - Uses PostgreSQL connection URL format, not individual host/port env vars
+3. **Credential Vending** - This PoC uses static S3 credentials passed through LakeKeeper to query engines. For production hardening with AWS S3, consider configuring LakeKeeper to vend temporary credentials via AWS STS (Security Token Service). Note that temporary credentials are only supported with actual AWS S3, not S3-compatible services like RustFS. Temporary credential vending provides: automatic credential rotation, time-limited access, and reduced risk from credential exposure.
 
 ---
 
