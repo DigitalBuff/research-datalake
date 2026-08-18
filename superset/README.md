@@ -24,8 +24,11 @@ Apache Superset - Modern data visualization and exploration platform with Trino 
 3. Add a Trino database connection:
    - Go to **Data** → **Databases** → **+ Database**
    - Select **Trino** (or use "Other" if not listed)
-   - **SQLAlchemy URI**: `trino://admin@trino:8080/iceberg`
-   - Note: Include a username (e.g., `admin`) even though Trino doesn't validate it
+   - **SQLAlchemy URI**: `trino://trino:trino@trino.datalake.local:443/iceberg`
+   - Advanced → Other → Engine Parameters:
+     ``` 
+     {"connect_args": {"http_scheme": "https", "verify": "/etc/ssl/datalake/root.pem"}}
+     ```
    - Test connection and save
 
 4. Explore your data:

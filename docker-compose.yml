@@ -156,12 +156,15 @@ services:
       - datalake-network
 
   # Trino - Lightweight query engine with native Iceberg support
+  # Reached externally only via Caddy (https://trino.datalake.local) — see the `caddy` service.
   trino:
     build:
       context: ./trino
       dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
+    environment:
+      TRINO_USER: ${TRINO_USER:-trino}
+      TRINO_PASSWORD: ${TRINO_PASSWORD:-trino}
+      TRINO_SHARED_SECRET: ${TRINO_SHARED_SECRET:-change-this-shared-secret}
     depends_on:
       lakekeeper-bootstrap:
         condition: service_completed_successfully
@@ -176,6 +179,26 @@ services:
       retries: 5
       start_period: 30s
 
+  # Caddy - TLS-terminating reverse proxy with a static internal CA,
+  # fronting Trino (trino.datalake.local) and Keycloak (auth.datalake.local).
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/pki:/pki:ro
+      - caddy-data:/data
+    depends_on:
+      trino:
+        condition: service_healthy
+    networks:
+      datalake-network:
+        # Let in-network services (e.g. Superset) reach Trino over Caddy's TLS
+        # edge under the same hostname external clients use.
+        aliases:
+          - trino.datalake.local
+
   # Superset - Data visualization and exploration platform
   superset:
     build:
@@ -189,6 +212,8 @@ services:
     volumes:
       - superset-data:/app/superset_home
       - ./superset/init-superset.sh:/app/docker-init.sh:ro
+      # Caddy's internal root CA, so Superset can verify the TLS edge in front of Trino.
+      - ./caddy/pki/root.pem:/etc/ssl/datalake/root.pem:ro
     depends_on:
       trino:
         condition: service_healthy
@@ -235,3 +260,4 @@ volumes:
   rustfs-data-1:
   postgres-catalog-data:
   superset-data:
+  caddy-data:

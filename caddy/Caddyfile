@@ -1,0 +1,20 @@
+{
+	local_certs
+	pki {
+		ca local {
+			root {
+				format pem_file
+				cert /pki/root.pem
+				key  /pki/root.key
+			}
+		}
+	}
+}
+
+trino.datalake.local {
+	reverse_proxy trino:8080
+}
+
+auth.datalake.local {
+	reverse_proxy keycloak:8080
+}

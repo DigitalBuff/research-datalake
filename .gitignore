@@ -8,3 +8,9 @@
 # Docker volumes and data
 data/
 volumes/
+
+# Caddy static root CA (generated locally by scripts/setup-caddy-pki.sh)
+caddy/pki/
+
+# AI
+.claude

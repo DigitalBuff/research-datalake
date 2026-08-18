@@ -30,7 +30,8 @@ Based on: https://dev.to/resurfacelabs/building-a-lightweight-trino-distribution
 
 ## Connecting to Trino
 
-- **URL**: http://localhost:8080
+- **URL**: https://trino.datalake.local (via the `caddy` reverse proxy — see `../caddy/`; Trino is not published directly)
+- **Auth**: username/password, from the `TRINO_USER` / `TRINO_PASSWORD` env vars
 - **Catalog**: `iceberg`
 - **Schemas**: Managed by LakeKeeper (e.g., `demo`)
 

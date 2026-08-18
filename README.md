@@ -12,7 +12,7 @@ See [spec.md](./spec.md) for the complete architecture plan.
 ## Prerequisites
 
 - Docker and Docker Compose installed
-- Ports available: 5433, 8080, 8088, 8181, 9000, 9001
+- Ports available: 443, 5433, 8088, 8181, 9000, 9001
 - AWS CLI (optional, for manual S3 operations)
 - Trino CLI (optional, for connecting to Trino)
 
@@ -43,7 +43,7 @@ See [spec.md](./spec.md) for the complete architecture plan.
 | Service | URL | Purpose |
 |---------|-----|---------|
 | **Superset** | http://localhost:8088 | Data visualization and exploration (login: admin/admin) |
-| **Trino** | http://localhost:8080 | Query engine endpoint |
+| **Trino** | https://trino.datalake.local | Query engine endpoint — behind Caddy TLS, requires a `hosts` entry and trusting the local CA (run [scripts/setup-caddy-pki.sh](./scripts/setup-caddy-pki.sh)), and username/password auth (`TRINO_USER`/`TRINO_PASSWORD` env vars) |
 | **LakeKeeper UI** | http://localhost:8181/ui/ | Manage warehouses, namespaces, and tables |
 | **LakeKeeper API** | http://localhost:8181 | REST catalog API |
 | **RustFS S3 API** | http://localhost:9000 | S3-compatible storage endpoint |
@@ -73,8 +73,8 @@ Region: us-east-1
          │
          ▼
 ┌─────────────────────────────────────────────────┐
-│  Trino (port 8080)                             │
-│  • Query Engine                                │
+│  Caddy (port 443) → Trino                      │
+│  • TLS termination + query engine              │
 │  • Native Iceberg Connector                    │
 └────────┬───────────────────────────────────────┘
          │
@@ -120,6 +120,10 @@ digitalbuff_datalake_stack/
 ├── README.md                    # This file
 ├── spec.md                      # Architecture specification
 ├── .gitignore
+├── caddy/
+│   └── Caddyfile                # TLS-terminating reverse proxy config
+├── scripts/
+│   └── setup-caddy-pki.sh       # Generates the static root CA + prints hosts entries
 ├── superset/
 │   ├── Dockerfile              # Superset with Trino support
 │   ├── README.md               # Superset documentation
