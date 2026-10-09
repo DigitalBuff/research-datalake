@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Generates the static Caddy root CA (once, idempotently) and prints the
-# hosts entries needed for trino.datalake.local / auth.datalake.local.
+# hosts entries needed for trino.datalake.local / auth.datalake.local /
+# trino-gateway.datalake.local. The gateway's own leaf certificate is issued
+# from this root CA by the `gateway-certs` service in docker-compose.yml.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -31,7 +33,7 @@ echo "=== hosts entries ==="
 PARALLELS_HOST_IP="10.211.55.2"
 
 echo "Windows VM (C:\\Windows\\System32\\drivers\\etc\\hosts):"
-echo "  ${PARALLELS_HOST_IP} trino.datalake.local auth.datalake.local"
+echo "  ${PARALLELS_HOST_IP} trino.datalake.local auth.datalake.local trino-gateway.datalake.local"
 echo
 echo "macOS (/etc/hosts):"
-echo "  127.0.0.1 trino.datalake.local auth.datalake.local"
+echo "  127.0.0.1 trino.datalake.local auth.datalake.local trino-gateway.datalake.local"

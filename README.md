@@ -6,13 +6,14 @@ This is the minimal foundational setup for the lightweight data lake PoC, consis
 - **PostgreSQL**: Metadata storage for LakeKeeper
 - **Trino**: Lightweight query engine with native Iceberg support
 - **Superset**: Modern data visualization and exploration platform
+- **PostgreSQL-Trino Gateway**: PostgreSQL wire-protocol endpoint in front of Trino, for clients that only speak PostgreSQL (e.g. Power BI DirectQuery)
 
 See [spec.md](./spec.md) for the complete architecture plan.
 
 ## Prerequisites
 
 - Docker and Docker Compose installed
-- Ports available: 443, 5433, 8088, 8181, 9000, 9001
+- Ports available: 443, 5432, 5433, 8088, 8181, 9000, 9001
 - AWS CLI (optional, for manual S3 operations)
 - Trino CLI (optional, for connecting to Trino)
 
@@ -44,6 +45,7 @@ See [spec.md](./spec.md) for the complete architecture plan.
 |---------|-----|---------|
 | **Superset** | http://localhost:8088 | Data visualization and exploration (login: admin/admin) |
 | **Trino** | https://trino.datalake.local | Query engine endpoint — behind Caddy TLS, requires a `hosts` entry and trusting the local CA (run [scripts/setup-caddy-pki.sh](./scripts/setup-caddy-pki.sh)), and username/password auth (`TRINO_USER`/`TRINO_PASSWORD` env vars) |
+| **PostgreSQL-Trino Gateway** | trino-gateway.datalake.local:5432 | PostgreSQL endpoint for Trino (Power BI DirectQuery) — TLS-only, same local CA and `hosts` requirement as Trino; log in with `TRINO_USER`/`TRINO_PASSWORD`, which are forwarded to Trino |
 | **LakeKeeper UI** | http://localhost:8181/ui/ | Manage warehouses, namespaces, and tables |
 | **LakeKeeper API** | http://localhost:8181 | REST catalog API |
 | **RustFS S3 API** | http://localhost:9000 | S3-compatible storage endpoint |

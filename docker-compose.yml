@@ -199,6 +199,76 @@ services:
         aliases:
           - trino.datalake.local
 
+  # Gateway certificates - Issues the PostgreSQL listener certificate from the
+  # same local root CA that fronts Trino, so clients trust a single CA.
+  # The gateway refuses `--auth` on a non-loopback bind without TLS.
+  gateway-certs:
+    image: alpine/openssl:latest
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if [ -f /certs/tls.crt ] && [ -f /certs/tls.key ]; then
+          echo "Gateway certificate already present — leaving it untouched."
+          exit 0
+        fi
+        echo "Issuing gateway certificate for ${GATEWAY_HOSTNAME:-trino-gateway.datalake.local} ..."
+        openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 3650 \
+          -CA /pki/root.pem -CAkey /pki/root.key \
+          -keyout /certs/tls.key -out /certs/tls.crt \
+          -subj "/CN=${GATEWAY_HOSTNAME:-trino-gateway.datalake.local}" \
+          -addext "subjectAltName=DNS:${GATEWAY_HOSTNAME:-trino-gateway.datalake.local},DNS:localhost,IP:127.0.0.1" \
+          -addext "basicConstraints=critical,CA:FALSE" \
+          -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
+          -addext "extendedKeyUsage=serverAuth"
+        # The gateway runs as a non-root user that shares no group with this container.
+        chmod 644 /certs/tls.key /certs/tls.crt
+    restart: "no"
+    volumes:
+      - ./caddy/pki:/pki:ro
+      - gateway-certs:/certs
+    networks:
+      - datalake-network
+
+  # PostgreSQL-Trino Gateway - PostgreSQL wire-protocol shim in front of Trino,
+  # for clients that only speak PostgreSQL (e.g. Power BI DirectQuery).
+  # Built from https://github.com/stackabletech/postgresql-trino-gateway
+  #
+  # Auth: `--auth` issues a cleartext password challenge to the PG client (over
+  # the listener's TLS) and forwards those credentials to Trino as HTTP Basic
+  # auth. Trino only accepts password auth over TLS, so the gateway reaches it
+  # through Caddy's edge; Caddy's internal CA is not in the image's trust store,
+  # hence `--trino-tls-no-verify` on this trusted internal network.
+  postgresql-trino-gateway:
+    build:
+      context: https://github.com/stackabletech/postgresql-trino-gateway.git#main
+      dockerfile: docker/Dockerfile
+    image: postgresql-trino-gateway:latest
+    ports:
+      - "5432:5432"
+    environment:
+      RUST_LOG: ${GATEWAY_LOG_LEVEL:-postgresql_trino_gateway=info}
+    command:
+      - --listen-addr=0.0.0.0:5432
+      - --tls-cert=/certs/tls.crt
+      - --tls-key=/certs/tls.key
+      - --auth
+      - --trino-host=trino.datalake.local
+      - --trino-port=443
+      - --trino-ssl
+      - --trino-tls-no-verify
+      - --trino-catalog=${GATEWAY_TRINO_CATALOG:-iceberg}
+      - --trino-schema=${GATEWAY_TRINO_SCHEMA:-demo}
+    volumes:
+      - gateway-certs:/certs:ro
+    depends_on:
+      gateway-certs:
+        condition: service_completed_successfully
+      caddy:
+        condition: service_started
+    networks:
+      - datalake-network
+
   # Superset - Data visualization and exploration platform
   superset:
     build:
@@ -261,3 +331,4 @@ volumes:
   postgres-catalog-data:
   superset-data:
   caddy-data:
+  gateway-certs:
