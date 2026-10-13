@@ -67,34 +67,48 @@ Region: us-east-1
 ## Service Architecture
 
 ```
+┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐
+│  Superset             │  │  Power BI Desktop     │  │  Power BI Desktop     │
+│  (port 8088)          │  │  • PowerBITrino-       │  │  • Built-in           │
+│  • Data Viz &         │  │    Connector           │  │    PostgreSQL         │
+│    Exploration        │  │  • Import Mode         │  │    connector          │
+└──────────┬────────────┘  └──────────┬────────────┘  └──────────┬────────────┘
+           │                          │                          │
+           ▼                          ▼                          ▼
+┌─────────────────────────────────────────────────┐  ┌─────────────────────────┐
+│  Caddy (port 443)                                │  │  PostgreSQL-Trino       │
+│  • TLS termination / reverse proxy               │◀─┤  Gateway (port 5432)    │
+└──────────────────────┬────────────────────────────┘  │  • PG wire protocol     │
+                        │                               │  • own TLS listener,    │
+                        │                               │    same root CA as      │
+                        │                               │    Caddy                │
+                        │                               └─────────────────────────┘
+                        ▼
 ┌─────────────────────────────────────────────────┐
-│  Superset (port 8088)                          │
-│  • Data Visualization & Exploration            │
-│  • Interactive Dashboards                      │
-└────────┬───────────────────────────────────────┘
-         │
-         ▼
+│  Trino                                           │
+│  • Query engine                                  │
+│  • Native Iceberg Connector                      │
+└──────────────────────┬────────────────────────────┘
+                        │
+                        ▼
 ┌─────────────────────────────────────────────────┐
-│  Caddy (port 443) → Trino                      │
-│  • TLS termination + query engine              │
-│  • Native Iceberg Connector                    │
-└────────┬───────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────┐
-│  LakeKeeper (port 8181)                        │
-│  • REST Catalog API                            │
-│  • Web UI at /ui/                              │
-└────────┬─────────────────────────┬──────────────┘
-         │                         │
-         ▼                         ▼
-┌──────────────────┐    ┌──────────────────────┐
-│  PostgreSQL      │    │  RustFS              │
-│  port 5433       │    │  S3: port 9000       │
-│  (Metadata)      │    │  Console: port 9001  │
-│                  │    │  (Object Storage)    │
-└──────────────────┘    └──────────────────────┘
+│  LakeKeeper (port 8181)                          │
+│  • REST Catalog API                              │
+│  • Web UI at /ui/                                │
+└──────────────────────┬────┬───────────────────────┘
+                        │    │
+            ┌───────────┘    └───────────┐
+            ▼                             ▼
+┌──────────────────┐          ┌──────────────────────┐
+│  PostgreSQL       │          │  RustFS               │
+│  port 5433        │          │  S3: port 9000        │
+│  (Metadata)       │          │  Console: port 9001   │
+│                   │          │  (Object Storage)     │
+└──────────────────┘          └──────────────────────┘
 ```
+
+- **Power BI (PowerBITrinoConnector, Import Mode)**: queries Trino directly through Caddy's TLS edge using the PowerBITrinoConnector custom connector; data is imported into Power BI's in-memory model.
+- **Power BI (built-in PostgreSQL connector)**: speaks the PostgreSQL wire protocol to the `postgresql-trino-gateway`, which forwards queries to Trino over Caddy's TLS edge — enabling DirectQuery from clients that can't use a custom Trino connector.
 
 ## Stopping and Cleaning Up
 

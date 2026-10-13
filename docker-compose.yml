@@ -199,8 +199,8 @@ services:
         aliases:
           - trino.datalake.local
 
-  # Gateway certificates - Issues the PostgreSQL listener certificate from the
-  # same local root CA that fronts Trino, so clients trust a single CA.
+  # Gateway certificates - Issues the trino-gateway listener certificate from the
+  # same local root CA that fronts Caddy, so clients trust a single CA.
   # The gateway refuses `--auth` on a non-loopback bind without TLS.
   gateway-certs:
     image: alpine/openssl:latest
